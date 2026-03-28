@@ -10,6 +10,30 @@ type EntryItem = {
   price: string;
 };
 
+type ChartOption = {
+  symbol: string;
+  base: string;
+  name: string;
+};
+
+const CHART_OPTIONS: ChartOption[] = [
+  { symbol: "BINANCE:BTCUSDT", base: "BTC", name: "Bitcoin" },
+  { symbol: "BINANCE:ETHUSDT", base: "ETH", name: "Ethereum" },
+  { symbol: "BINANCE:BNBUSDT", base: "BNB", name: "BNB" },
+  { symbol: "BINANCE:SOLUSDT", base: "SOL", name: "Solana" },
+  { symbol: "BINANCE:XRPUSDT", base: "XRP", name: "XRP" },
+  { symbol: "BINANCE:ADAUSDT", base: "ADA", name: "Cardano" },
+  { symbol: "BINANCE:DOGEUSDT", base: "DOGE", name: "Dogecoin" },
+  { symbol: "BINANCE:AVAXUSDT", base: "AVAX", name: "Avalanche" },
+  { symbol: "BINANCE:LINKUSDT", base: "LINK", name: "Chainlink" },
+  { symbol: "BINANCE:DOTUSDT", base: "DOT", name: "Polkadot" },
+  { symbol: "BINANCE:TRXUSDT", base: "TRX", name: "TRON" },
+  { symbol: "BINANCE:TONUSDT", base: "TON", name: "Toncoin" },
+  { symbol: "BINANCE:NEARUSDT", base: "NEAR", name: "NEAR Protocol" },
+  { symbol: "BINANCE:ARBUSDT", base: "ARB", name: "Arbitrum" },
+  { symbol: "BINANCE:OPUSDT", base: "OP", name: "Optimism" },
+];
+
 const formatMoney = (value: number) =>
   Number.isFinite(value)
     ? value.toLocaleString("en-US", {
@@ -31,15 +55,44 @@ const asNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const normalizeChartSymbol = (value: string) => {
+  const normalized = value.trim().toUpperCase().replace(/\s+/g, "");
+  if (!normalized) {
+    return "BINANCE:BTCUSDT";
+  }
+  if (normalized.includes(":")) {
+    return normalized;
+  }
+  if (normalized.endsWith("USDT")) {
+    return `BINANCE:${normalized}`;
+  }
+  return `BINANCE:${normalized}USDT`;
+};
+
 export default function EntryRiskPlannerPage() {
   const [positionType, setPositionType] = useState<PositionType>("long");
   const [leverage, setLeverage] = useState("");
   const [stopPrice, setStopPrice] = useState("");
   const [maxLossUsdt, setMaxLossUsdt] = useState("");
+  const [chartSymbol, setChartSymbol] = useState("BINANCE:BTCUSDT");
+  const [chartSearch, setChartSearch] = useState("BTC");
   const [entries, setEntries] = useState<EntryItem[]>([{ id: 1, price: "" }]);
   const [nextId, setNextId] = useState(2);
 
   const leverageValue = Math.max(1, asNumber(leverage) || 1);
+  const chartSymbolParam = encodeURIComponent(chartSymbol);
+  const chartEmbedUrl = `https://s.tradingview.com/widgetembed/?symbol=${chartSymbolParam}&interval=60&hidesidetoolbar=1&symboledit=1&saveimage=1&toolbarbg=0f172a&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`;
+  const chartOpenUrl = `https://www.tradingview.com/chart/?symbol=${chartSymbolParam}`;
+  const filteredChartOptions = useMemo(() => {
+    const q = chartSearch.trim().toUpperCase();
+    if (!q) {
+      return CHART_OPTIONS.slice(0, 8);
+    }
+    return CHART_OPTIONS.filter((option) => {
+      const full = `${option.base} ${option.name} ${option.symbol}`.toUpperCase();
+      return full.includes(q);
+    }).slice(0, 8);
+  }, [chartSearch]);
 
   const result = useMemo(() => {
     const stop = asNumber(stopPrice);
@@ -77,6 +130,7 @@ export default function EntryRiskPlannerPage() {
         })),
         totalNotional: 0,
         totalMargin: 0,
+        averageEntryPrice: 0,
       };
     }
 
@@ -90,15 +144,18 @@ export default function EntryRiskPlannerPage() {
           recommendedNotional: 0,
           recommendedMargin: 0,
           estimatedLoss: 0,
+          recommendedQty: 0,
         };
       }
 
       const estimatedLoss = recommendedNotionalPerEntry * row.lossFactor;
+      const recommendedQty = row.entryPrice > 0 ? recommendedNotionalPerEntry / row.entryPrice : 0;
       return {
         ...row,
         recommendedNotional: recommendedNotionalPerEntry,
         recommendedMargin: recommendedNotionalPerEntry / leverageValue,
         estimatedLoss,
+        recommendedQty,
       };
     });
 
@@ -106,7 +163,9 @@ export default function EntryRiskPlannerPage() {
       (sum, row) => sum + row.recommendedNotional,
       0,
     );
+    const totalQty = withAlloc.reduce((sum, row) => sum + row.recommendedQty, 0);
     const totalMargin = totalNotional / leverageValue;
+    const averageEntryPrice = totalQty > 0 ? totalNotional / totalQty : 0;
 
     return {
       canCalculate: true,
@@ -114,6 +173,7 @@ export default function EntryRiskPlannerPage() {
       rows: withAlloc,
       totalNotional,
       totalMargin,
+      averageEntryPrice,
     };
   }, [entries, stopPrice, maxLossUsdt, positionType, leverageValue]);
 
@@ -151,6 +211,15 @@ export default function EntryRiskPlannerPage() {
     setNextId(2);
   };
 
+  const applyChartSymbol = () => {
+    setChartSymbol(normalizeChartSymbol(chartSearch));
+  };
+
+  const selectChartOption = (option: ChartOption) => {
+    setChartSymbol(option.symbol);
+    setChartSearch(option.base);
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050b17] text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_8%,rgba(34,197,94,0.24),transparent_36%),radial-gradient(circle_at_85%_0%,rgba(6,182,212,0.2),transparent_30%),radial-gradient(circle_at_60%_100%,rgba(239,68,68,0.15),transparent_28%)]" />
@@ -176,8 +245,70 @@ export default function EntryRiskPlannerPage() {
             >
               Main Calculator
             </Link>
+            <a
+              href={chartOpenUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border border-emerald-400/70 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/30"
+            >
+              + TradingView
+            </a>
           </div>
         </header>
+
+        <section className="mt-4 rounded-xl border border-slate-700 bg-slate-900/75 p-4 sm:p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-100">Integrated Chart</h2>
+            <p className="text-xs text-slate-300">TradingView - {chartSymbol}</p>
+          </div>
+          <div className="mb-3 grid gap-2.5 rounded-lg border border-slate-800 bg-slate-950/55 p-3 sm:grid-cols-[1fr_auto]">
+            <div className="relative">
+              <input
+                type="text"
+                value={chartSearch}
+                onChange={(event) => setChartSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    applyChartSymbol();
+                  }
+                }}
+                placeholder="Coin yaz: BTC, ETH, SOL və ya BINANCE:ADAUSDT"
+                className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-500"
+              />
+              {filteredChartOptions.length > 0 ? (
+                <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-700 bg-slate-900 shadow-xl">
+                  {filteredChartOptions.map((option) => (
+                    <button
+                      key={option.symbol}
+                      type="button"
+                      onClick={() => selectChartOption(option)}
+                      className="flex w-full items-center justify-between px-2.5 py-2 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                    >
+                      <span>{option.name} ({option.base})</span>
+                      <span className="text-slate-400">{option.symbol}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={applyChartSymbol}
+              className="rounded-md border border-cyan-500/60 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/20"
+            >
+              Open Chart
+            </button>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950/60">
+            <iframe
+              title="TradingView BTCUSDT Chart"
+              src={chartEmbedUrl}
+              className="h-[430px] w-full"
+              loading="lazy"
+              allowFullScreen
+            />
+          </div>
+        </section>
 
         <section className="mt-4 grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-xl border border-slate-700 bg-slate-900/75 p-4 sm:p-5">
@@ -338,6 +469,10 @@ export default function EntryRiskPlannerPage() {
             </div>
 
             <div className="mt-3 grid gap-2.5">
+              <div className="rounded-lg border border-cyan-900/50 bg-cyan-950/20 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-cyan-300">Average Entry Price</p>
+                <p className="mt-1 text-base font-semibold text-cyan-200">{formatPrice(result.averageEntryPrice)}</p>
+              </div>
               <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
                 <p className="text-[11px] uppercase tracking-wide text-slate-400">Total Notional</p>
                 <p className="mt-1 text-base font-semibold text-slate-100">{formatMoney(result.totalNotional)} USDT</p>
@@ -349,6 +484,7 @@ export default function EntryRiskPlannerPage() {
             </div>
           </aside>
         </section>
+
       </main>
     </div>
   );
