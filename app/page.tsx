@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 
 type PositionType = "long" | "short";
 type MarginMode = "isolated" | "cross";
 
 type EntryInput = {
   price: string;
-  allocationPercent: string;
+  marginUsdt: string;
 };
 
 type TakeProfitInput = {
@@ -38,14 +39,13 @@ const safeNumber = (value: string) => {
 };
 
 export default function Home() {
-  const [margin, setMargin] = useState("500");
   const [leverage, setLeverage] = useState("");
   const [positionType, setPositionType] = useState<PositionType>("long");
   const [marginMode, setMarginMode] = useState<MarginMode>("isolated");
   const [accountBalance, setAccountBalance] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [entries, setEntries] = useState<EntryInput[]>([
-    { price: "", allocationPercent: "" },
+    { price: "", marginUsdt: "" },
   ]);
   const [tpTargets, setTpTargets] = useState<TakeProfitInput[]>([
     { id: 1, price: "", closePercent: "" },
@@ -53,32 +53,31 @@ export default function Home() {
   const [nextTpId, setNextTpId] = useState(2);
 
   const calculations = useMemo(() => {
-    const marginValue = Math.max(0, safeNumber(margin));
     const leverageValue = Math.max(1, safeNumber(leverage));
     const crossBalance = Math.max(0, safeNumber(accountBalance));
-    const riskCapital = marginMode === "cross" ? crossBalance : marginValue;
     const slValue = safeNumber(stopLoss);
-    const totalPositionSize = marginValue * leverageValue;
 
     let totalQty = 0;
     let totalNotional = 0;
-    let allocationTotal = 0;
+    let totalUsedMargin = 0;
 
     entries.forEach((entry) => {
       const price = safeNumber(entry.price);
-      const allocation = Math.max(0, safeNumber(entry.allocationPercent));
-      if (price <= 0 || allocation <= 0 || marginValue <= 0) {
+      const entryMargin = Math.max(0, safeNumber(entry.marginUsdt));
+      if (price <= 0 || entryMargin <= 0) {
         return;
       }
 
-      const allocatedMargin = marginValue * (allocation / 100);
-      const notional = allocatedMargin * leverageValue;
+      const notional = entryMargin * leverageValue;
       const qty = notional / price;
 
       totalNotional += notional;
       totalQty += qty;
-      allocationTotal += allocation;
+      totalUsedMargin += entryMargin;
     });
+
+    const totalPositionSize = totalUsedMargin * leverageValue;
+    const riskCapital = marginMode === "cross" ? crossBalance : totalUsedMargin;
 
     const avgEntry = totalQty > 0 ? totalNotional / totalQty : 0;
     const activePositionSize = totalNotional;
@@ -122,13 +121,12 @@ export default function Home() {
       slLossAbs > 0 ? totalExpectedProfit / slLossAbs : totalExpectedProfit > 0 ? Infinity : 0;
 
     return {
-      marginValue,
       leverageValue,
       riskCapital,
+      totalUsedMargin,
       avgEntry,
       totalPositionSize,
       activePositionSize,
-      allocationTotal,
       slLossAbs,
       slRoePercent,
       tpRows,
@@ -138,7 +136,6 @@ export default function Home() {
       riskRewardRatio,
     };
   }, [
-    margin,
     leverage,
     stopLoss,
     entries,
@@ -182,7 +179,7 @@ export default function Home() {
       if (prev.length >= 3) {
         return prev;
       }
-      return [...prev, { price: "", allocationPercent: "" }];
+      return [...prev, { price: "", marginUsdt: "" }];
     });
   };
 
@@ -196,14 +193,13 @@ export default function Home() {
   };
 
   const clearAll = () => {
-    setMargin("0");
-    setLeverage("0");
+    setLeverage("");
     setPositionType("long");
     setMarginMode("isolated");
-    setAccountBalance("0");
-    setStopLoss("0");
-    setEntries([{ price: "0", allocationPercent: "0" }]);
-    setTpTargets([{ id: 1, price: "0", closePercent: "0" }]);
+    setAccountBalance("");
+    setStopLoss("");
+    setEntries([{ price: "", marginUsdt: "" }]);
+    setTpTargets([{ id: 1, price: "", closePercent: "" }]);
     setNextTpId(2);
   };
 
@@ -216,15 +212,25 @@ export default function Home() {
 
       <main className="relative mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5 lg:px-6">
         <header className="rounded-xl border border-slate-700/70 bg-slate-900/70 p-4 backdrop-blur-sm sm:p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
-            Crypto Futures Toolkit
-          </p>
-          <h1 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
-            Trade Risk and Reward Calculator
-          </h1>
-          <p className="mt-1.5 max-w-3xl text-xs text-slate-300 sm:text-sm">
-            Build your DCA position, map stop-loss risk, and plan multi-target take-profit exits in USDT before entering a trade.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
+                Crypto Futures Toolkit
+              </p>
+              <h1 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
+                Trade Risk and Reward Calculator
+              </h1>
+              <p className="mt-1.5 max-w-3xl text-xs text-slate-300 sm:text-sm">
+                Build your DCA position, map stop-loss risk, and plan multi-target take-profit exits in USDT before entering a trade.
+              </p>
+            </div>
+            <Link
+              href="/entry-risk-planner"
+              className="rounded-md border border-emerald-400/70 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/30"
+            >
+              Entry Risk Planner
+            </Link>
+          </div>
         </header>
 
         <section className="grid gap-4 lg:grid-cols-[1.16fr_0.84fr]">
@@ -241,19 +247,6 @@ export default function Home() {
                 </button>
               </div>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <label className="space-y-2">
-                  <span className="text-xs text-slate-300">Total Margin / Capital (USDT)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={margin}
-                    onChange={(event) => setMargin(event.target.value)}
-                    className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-2 text-xs text-slate-100 outline-none ring-0 transition focus:border-cyan-500"
-                    placeholder="500"
-                  />
-                </label>
-
                 <div className="space-y-2">
                   <span className="text-xs text-slate-300">Leverage</span>
                   <div className="flex items-center gap-2">
@@ -275,6 +268,13 @@ export default function Home() {
                     />
                     <span className="text-xs text-cyan-300">x</span>
                   </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-400">Auto Total Margin</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-100">
+                    {formatMoney(calculations.totalUsedMargin)} USDT
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -389,17 +389,16 @@ export default function Home() {
                     </label>
                     <label className="space-y-1.5">
                       <span className="text-[11px] uppercase tracking-wide text-slate-400">
-                        Allocation %
+                        Entry Margin (USDT)
                       </span>
                       <input
                         type="number"
                         min="0"
-                        max="100"
                         step="0.01"
-                        value={entry.allocationPercent}
-                        onChange={(event) => updateEntry(index, "allocationPercent", event.target.value)}
+                        value={entry.marginUsdt}
+                        onChange={(event) => updateEntry(index, "marginUsdt", event.target.value)}
                         className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-500"
-                        placeholder="e.g. 33.33"
+                        placeholder="USDT"
                       />
                     </label>
                     <button
@@ -416,7 +415,7 @@ export default function Home() {
 
               <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
                 <p>
-                  Allocation Entered: <span className="font-semibold text-slate-100">{formatMoney(calculations.allocationTotal)}%</span>
+                  Total Used Margin: <span className="font-semibold text-slate-100">{formatMoney(calculations.totalUsedMargin)} USDT</span>
                 </p>
                 <p className="mt-1">
                   Weighted Average Entry: <span className="font-semibold text-cyan-300">{formatPrice(calculations.avgEntry)}</span>
@@ -556,6 +555,11 @@ export default function Home() {
               <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
                 <p className="text-[11px] uppercase tracking-wide text-slate-400">Total Position Size</p>
                 <p className="mt-1 text-base font-semibold text-slate-100">{formatMoney(calculations.totalPositionSize)} USDT</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Used Margin (Auto)</p>
+                <p className="mt-1 text-base font-semibold text-slate-100">{formatMoney(calculations.totalUsedMargin)} USDT</p>
               </div>
 
               <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
