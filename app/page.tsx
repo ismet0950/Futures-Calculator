@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 type PositionType = "long" | "short";
+type MarginMode = "isolated" | "cross";
 
 type EntryInput = {
   price: string;
@@ -37,23 +38,25 @@ const safeNumber = (value: string) => {
 };
 
 export default function Home() {
-  const [margin, setMargin] = useState("1000");
-  const [leverage, setLeverage] = useState("20");
+  const [margin, setMargin] = useState("500");
+  const [leverage, setLeverage] = useState("");
   const [positionType, setPositionType] = useState<PositionType>("long");
+  const [marginMode, setMarginMode] = useState<MarginMode>("isolated");
+  const [accountBalance, setAccountBalance] = useState("");
   const [stopLoss, setStopLoss] = useState("");
   const [entries, setEntries] = useState<EntryInput[]>([
-    { price: "42000", allocationPercent: "20" },
-    { price: "41000", allocationPercent: "30" },
-    { price: "40000", allocationPercent: "50" },
+    { price: "", allocationPercent: "" },
   ]);
   const [tpTargets, setTpTargets] = useState<TakeProfitInput[]>([
-    { id: 1, price: "44000", closePercent: "100" },
+    { id: 1, price: "", closePercent: "" },
   ]);
   const [nextTpId, setNextTpId] = useState(2);
 
   const calculations = useMemo(() => {
     const marginValue = Math.max(0, safeNumber(margin));
     const leverageValue = Math.max(1, safeNumber(leverage));
+    const crossBalance = Math.max(0, safeNumber(accountBalance));
+    const riskCapital = marginMode === "cross" ? crossBalance : marginValue;
     const slValue = safeNumber(stopLoss);
     const totalPositionSize = marginValue * leverageValue;
 
@@ -87,7 +90,7 @@ export default function Home() {
           : (avgEntry - slValue) * totalQty
         : 0;
     const slLossAbs = Math.max(0, -slPnl);
-    const slRoePercent = marginValue > 0 ? (slPnl / marginValue) * 100 : 0;
+    const slRoePercent = riskCapital > 0 ? (slPnl / riskCapital) * 100 : 0;
 
     const tpRows = tpTargets.map((tp) => {
       const price = safeNumber(tp.price);
@@ -121,6 +124,7 @@ export default function Home() {
     return {
       marginValue,
       leverageValue,
+      riskCapital,
       avgEntry,
       totalPositionSize,
       activePositionSize,
@@ -133,7 +137,16 @@ export default function Home() {
       totalExpectedProfit,
       riskRewardRatio,
     };
-  }, [margin, leverage, stopLoss, entries, tpTargets, positionType]);
+  }, [
+    margin,
+    leverage,
+    stopLoss,
+    entries,
+    tpTargets,
+    positionType,
+    marginMode,
+    accountBalance,
+  ]);
 
   const updateEntry = (
     index: number,
@@ -156,7 +169,7 @@ export default function Home() {
   };
 
   const addTp = () => {
-    setTpTargets((prev) => [...prev, { id: nextTpId, price: "", closePercent: "0" }]);
+    setTpTargets((prev) => [...prev, { id: nextTpId, price: "", closePercent: "" }]);
     setNextTpId((prev) => prev + 1);
   };
 
@@ -164,50 +177,91 @@ export default function Home() {
     setTpTargets((prev) => prev.filter((tp) => tp.id !== id));
   };
 
+  const addEntry = () => {
+    setEntries((prev) => {
+      if (prev.length >= 3) {
+        return prev;
+      }
+      return [...prev, { price: "", allocationPercent: "" }];
+    });
+  };
+
+  const removeEntry = (index: number) => {
+    setEntries((prev) => {
+      if (prev.length === 1) {
+        return prev;
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const clearAll = () => {
+    setMargin("0");
+    setLeverage("0");
+    setPositionType("long");
+    setMarginMode("isolated");
+    setAccountBalance("0");
+    setStopLoss("0");
+    setEntries([{ price: "0", allocationPercent: "0" }]);
+    setTpTargets([{ id: 1, price: "0", closePercent: "0" }]);
+    setNextTpId(2);
+  };
+
+  const leverageSliderValue = Math.max(1, Math.min(125, safeNumber(leverage) || 1));
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050b17] text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(34,197,94,0.22),transparent_32%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.18),transparent_28%),radial-gradient(circle_at_50%_100%,rgba(220,38,38,0.14),transparent_24%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:38px_38px]" />
 
-      <main className="relative mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        <header className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-5 backdrop-blur-sm sm:p-6">
+      <main className="relative mx-auto flex w-full max-w-7xl flex-col gap-4 px-3 py-4 sm:px-5 sm:py-5 lg:px-6">
+        <header className="rounded-xl border border-slate-700/70 bg-slate-900/70 p-4 backdrop-blur-sm sm:p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
             Crypto Futures Toolkit
           </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">
+          <h1 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-100 sm:text-2xl">
             Trade Risk and Reward Calculator
           </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-300 sm:text-base">
+          <p className="mt-1.5 max-w-3xl text-xs text-slate-300 sm:text-sm">
             Build your DCA position, map stop-loss risk, and plan multi-target take-profit exits in USDT before entering a trade.
           </p>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[1.18fr_0.82fr]">
-          <div className="space-y-6">
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/75 p-5 shadow-[0_18px_60px_-24px_rgba(15,23,42,0.9)] sm:p-6">
-              <h2 className="text-lg font-semibold text-slate-100">Basic Trade Setup</h2>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <section className="grid gap-4 lg:grid-cols-[1.16fr_0.84fr]">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-700 bg-slate-900/75 p-4 shadow-[0_18px_60px_-24px_rgba(15,23,42,0.9)] sm:p-5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-semibold text-slate-100">Basic Trade Setup</h2>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="rounded-md border border-slate-700 bg-slate-950/50 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition hover:border-rose-500 hover:text-rose-300"
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="space-y-2">
-                  <span className="text-sm text-slate-300">Total Margin / Capital (USDT)</span>
+                  <span className="text-xs text-slate-300">Total Margin / Capital (USDT)</span>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
                     value={margin}
                     onChange={(event) => setMargin(event.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none ring-0 transition focus:border-cyan-500"
-                    placeholder="e.g. 1000"
+                    className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-2 text-xs text-slate-100 outline-none ring-0 transition focus:border-cyan-500"
+                    placeholder="500"
                   />
                 </label>
 
                 <div className="space-y-2">
-                  <span className="text-sm text-slate-300">Leverage</span>
-                  <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-300">Leverage</span>
+                  <div className="flex items-center gap-2">
                     <input
                       type="range"
                       min="1"
                       max="125"
-                      value={calculations.leverageValue}
+                      value={leverageSliderValue}
                       onChange={(event) => setLeverage(event.target.value)}
                       className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-800 accent-cyan-500"
                     />
@@ -217,19 +271,19 @@ export default function Home() {
                       max="125"
                       value={leverage}
                       onChange={(event) => setLeverage(event.target.value)}
-                      className="w-20 rounded-lg border border-slate-700 bg-slate-950/70 px-2 py-2 text-right text-sm text-slate-100 outline-none transition focus:border-cyan-500"
+                      className="w-16 rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1.5 text-right text-xs text-slate-100 outline-none transition focus:border-cyan-500"
                     />
-                    <span className="text-sm text-cyan-300">x</span>
+                    <span className="text-xs text-cyan-300">x</span>
                   </div>
                 </div>
 
-                <div className="space-y-2 sm:col-span-2">
-                  <span className="text-sm text-slate-300">Position Type</span>
-                  <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950/60 p-1">
+                <div className="space-y-2">
+                  <span className="text-xs text-slate-300">Position Type</span>
+                  <div className="inline-flex rounded-md border border-slate-700 bg-slate-950/60 p-0.5">
                     <button
                       type="button"
                       onClick={() => setPositionType("long")}
-                      className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                      className={`rounded px-3 py-1.5 text-xs font-medium transition ${
                         positionType === "long"
                           ? "bg-emerald-500/20 text-emerald-300"
                           : "text-slate-300 hover:text-slate-100"
@@ -240,7 +294,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setPositionType("short")}
-                      className={`rounded-md px-4 py-2 text-sm font-medium transition ${
+                      className={`rounded px-3 py-1.5 text-xs font-medium transition ${
                         positionType === "short"
                           ? "bg-rose-500/20 text-rose-300"
                           : "text-slate-300 hover:text-slate-100"
@@ -250,20 +304,77 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+
+                <div className="space-y-2 sm:col-span-2">
+                  <span className="text-xs text-slate-300">Margin Mode</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex rounded-md border border-slate-700 bg-slate-950/60 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setMarginMode("isolated")}
+                        className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                          marginMode === "isolated"
+                            ? "bg-cyan-500/20 text-cyan-300"
+                            : "text-slate-300 hover:text-slate-100"
+                        }`}
+                      >
+                        Isolated
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMarginMode("cross")}
+                        className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                          marginMode === "cross"
+                            ? "bg-cyan-500/20 text-cyan-300"
+                            : "text-slate-300 hover:text-slate-100"
+                        }`}
+                      >
+                        Cross
+                      </button>
+                    </div>
+                    <label className="min-w-[180px] flex-1 space-y-1">
+                      <span className="text-[11px] text-slate-400">
+                        Account Balance (for Cross mode)
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={accountBalance}
+                        onChange={(event) => setAccountBalance(event.target.value)}
+                        disabled={marginMode !== "cross"}
+                        className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-500 disabled:opacity-50"
+                        placeholder="Cross risk capital"
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/75 p-5 sm:p-6">
-              <h2 className="text-lg font-semibold text-slate-100">Entry Points (DCA)</h2>
-              <p className="mt-1 text-sm text-slate-300">
-                Configure up to 3 entries and allocation percentages.
-              </p>
+            <div className="rounded-xl border border-slate-700 bg-slate-900/75 p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-100">Entry Points (DCA)</h2>
+                  <p className="mt-1 text-xs text-slate-300">
+                    Start with 1 entry and add up to 3.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addEntry}
+                  disabled={entries.length >= 3}
+                  className="rounded-md border border-cyan-500/60 bg-cyan-500/10 px-2.5 py-1.5 text-xs font-medium text-cyan-300 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Add Entry
+                </button>
+              </div>
 
-              <div className="mt-4 grid gap-3">
+              <div className="mt-3 grid gap-2.5">
                 {entries.map((entry, index) => (
-                  <div key={`entry-${index}`} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 sm:grid-cols-[1fr_1fr]">
+                  <div key={`entry-${index}`} className="grid gap-2.5 rounded-lg border border-slate-800 bg-slate-950/50 p-3 sm:grid-cols-[1fr_1fr_auto]">
                     <label className="space-y-1.5">
-                      <span className="text-xs uppercase tracking-wide text-slate-400">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-400">
                         Entry {index + 1} Price
                       </span>
                       <input
@@ -272,12 +383,12 @@ export default function Home() {
                         step="0.0001"
                         value={entry.price}
                         onChange={(event) => updateEntry(index, "price", event.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-500"
+                        className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-500"
                         placeholder="Price"
                       />
                     </label>
                     <label className="space-y-1.5">
-                      <span className="text-xs uppercase tracking-wide text-slate-400">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-400">
                         Allocation %
                       </span>
                       <input
@@ -287,15 +398,23 @@ export default function Home() {
                         step="0.01"
                         value={entry.allocationPercent}
                         onChange={(event) => updateEntry(index, "allocationPercent", event.target.value)}
-                        className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-cyan-500"
+                        className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-500"
                         placeholder="e.g. 33.33"
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => removeEntry(index)}
+                      disabled={entries.length === 1}
+                      className="self-end rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-rose-500 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Remove
+                    </button>
                   </div>
                 ))}
               </div>
 
-              <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300">
                 <p>
                   Allocation Entered: <span className="font-semibold text-slate-100">{formatMoney(calculations.allocationTotal)}%</span>
                 </p>
@@ -305,61 +424,61 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/75 p-5 sm:p-6">
-              <h2 className="text-lg font-semibold text-slate-100">Stop Loss (SL)</h2>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-700 bg-slate-900/75 p-4 sm:p-5">
+              <h2 className="text-base font-semibold text-slate-100">Stop Loss (SL)</h2>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label className="space-y-2">
-                  <span className="text-sm text-slate-300">Stop Loss Price</span>
+                  <span className="text-xs text-slate-300">Stop Loss Price</span>
                   <input
                     type="number"
                     min="0"
                     step="0.0001"
                     value={stopLoss}
                     onChange={(event) => setStopLoss(event.target.value)}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition focus:border-rose-500"
+                    className="w-full rounded-md border border-slate-700 bg-slate-950/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-rose-500"
                     placeholder="SL price"
                   />
                 </label>
 
-                <div className="rounded-xl border border-rose-900/50 bg-rose-950/20 p-4">
-                  <p className="text-sm text-rose-300">Estimated Loss if SL Hit</p>
-                  <p className="mt-1 text-2xl font-semibold text-rose-300">
+                <div className="rounded-lg border border-rose-900/50 bg-rose-950/20 p-3">
+                  <p className="text-xs text-rose-300">Estimated Loss if SL Hit</p>
+                  <p className="mt-1 text-xl font-semibold text-rose-300">
                     -{formatMoney(calculations.slLossAbs)} USDT
                   </p>
-                  <p className="mt-2 text-sm text-rose-200/90">
+                  <p className="mt-1 text-xs text-rose-200/90">
                     SL ROE: {calculations.slRoePercent.toFixed(2)}%
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/75 p-5 sm:p-6">
+            <div className="rounded-xl border border-slate-700 bg-slate-900/75 p-4 sm:p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-100">Take Profit Targets</h2>
-                  <p className="mt-1 text-sm text-slate-300">
+                  <h2 className="text-base font-semibold text-slate-100">Take Profit Targets</h2>
+                  <p className="mt-1 text-xs text-slate-300">
                     Add dynamic TP levels with close percentages.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={addTp}
-                  className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-300 transition hover:bg-emerald-500/20"
+                  className="rounded-md border border-emerald-500/60 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/20"
                 >
                   Add TP Target
                 </button>
               </div>
 
-              <div className="mt-4 grid gap-3">
+              <div className="mt-3 grid gap-2.5">
                 {tpTargets.map((tp, index) => {
                   const row = calculations.tpRows.find((item) => item.id === tp.id);
                   const rowProfit = row?.profit ?? 0;
 
                   return (
-                    <div key={tp.id} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                      <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+                    <div key={tp.id} className="grid gap-2.5 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                      <div className="grid gap-2.5 sm:grid-cols-[1fr_1fr_auto]">
                         <label className="space-y-1.5">
-                          <span className="text-xs uppercase tracking-wide text-slate-400">
+                          <span className="text-[11px] uppercase tracking-wide text-slate-400">
                             TP{index + 1} Price
                           </span>
                           <input
@@ -368,12 +487,12 @@ export default function Home() {
                             step="0.0001"
                             value={tp.price}
                             onChange={(event) => updateTp(tp.id, "price", event.target.value)}
-                            className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-500"
+                            className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-emerald-500"
                             placeholder="TP price"
                           />
                         </label>
                         <label className="space-y-1.5">
-                          <span className="text-xs uppercase tracking-wide text-slate-400">
+                          <span className="text-[11px] uppercase tracking-wide text-slate-400">
                             Closing %
                           </span>
                           <input
@@ -383,7 +502,7 @@ export default function Home() {
                             step="0.01"
                             value={tp.closePercent}
                             onChange={(event) => updateTp(tp.id, "closePercent", event.target.value)}
-                            className="w-full rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-emerald-500"
+                            className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-emerald-500"
                             placeholder="e.g. 40"
                           />
                         </label>
@@ -391,13 +510,13 @@ export default function Home() {
                           type="button"
                           disabled={tpTargets.length === 1}
                           onClick={() => removeTp(tp.id)}
-                          className="self-end rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 transition hover:border-rose-500 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="self-end rounded-md border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 transition hover:border-rose-500 hover:text-rose-300 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           Remove
                         </button>
                       </div>
-                      <div className="rounded-lg border border-emerald-900/45 bg-emerald-950/20 px-3 py-2 text-sm">
-                        <p className="text-emerald-300">
+                      <div className="rounded-md border border-emerald-900/45 bg-emerald-950/20 px-2.5 py-1.5 text-xs">
+                        <p className="text-emerald-300 text-xs">
                           TP{index + 1} Profit: <span className="font-semibold">{formatMoney(rowProfit)} USDT</span>
                         </p>
                       </div>
@@ -406,57 +525,65 @@ export default function Home() {
                 })}
               </div>
 
-              <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                <p className="text-sm text-slate-300">
+              <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                <p className="text-xs text-slate-300">
                   Total TP Closing: {formatMoney(calculations.totalTpClosePercent)}%
                 </p>
                 {calculations.tpOverLimit ? (
-                  <p className="mt-1 text-sm text-rose-300">
+                  <p className="mt-1 text-xs text-rose-300">
                     Closing percentages exceed 100%. Reduce TP allocations.
                   </p>
                 ) : (
-                  <p className="mt-1 text-sm text-emerald-300">
+                  <p className="mt-1 text-xs text-emerald-300">
                     Closing percentages are valid.
                   </p>
                 )}
-                <p className="mt-3 text-lg font-semibold text-emerald-300">
+                <p className="mt-2 text-base font-semibold text-emerald-300">
                   Total Expected Profit: {formatMoney(calculations.totalExpectedProfit)} USDT
                 </p>
               </div>
             </div>
           </div>
 
-          <aside className="h-fit rounded-2xl border border-slate-700 bg-slate-900/75 p-5 shadow-[0_18px_60px_-24px_rgba(15,23,42,0.9)] sm:p-6 lg:sticky lg:top-6">
-            <h2 className="text-lg font-semibold text-slate-100">Trade Summary</h2>
-            <div className="mt-4 grid gap-3">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-3.5">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Average Entry Price</p>
-                <p className="mt-1 text-lg font-semibold text-cyan-300">{formatPrice(calculations.avgEntry)}</p>
+          <aside className="h-fit rounded-xl border border-slate-700 bg-slate-900/75 p-4 shadow-[0_18px_60px_-24px_rgba(15,23,42,0.9)] sm:p-5 lg:sticky lg:top-5">
+            <h2 className="text-base font-semibold text-slate-100">Trade Summary</h2>
+            <div className="mt-3 grid gap-2.5">
+              <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Average Entry Price</p>
+                <p className="mt-1 text-base font-semibold text-cyan-300">{formatPrice(calculations.avgEntry)}</p>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-3.5">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Total Position Size</p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">{formatMoney(calculations.totalPositionSize)} USDT</p>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Total Position Size</p>
+                <p className="mt-1 text-base font-semibold text-slate-100">{formatMoney(calculations.totalPositionSize)} USDT</p>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-3.5">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Active Position Size (From Entries)</p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">{formatMoney(calculations.activePositionSize)} USDT</p>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Active Position Size (Entries)</p>
+                <p className="mt-1 text-base font-semibold text-slate-100">{formatMoney(calculations.activePositionSize)} USDT</p>
               </div>
 
-              <div className="rounded-xl border border-rose-900/50 bg-rose-950/20 p-3.5">
-                <p className="text-xs uppercase tracking-wide text-rose-300">Max Risk (SL Loss)</p>
-                <p className="mt-1 text-lg font-semibold text-rose-300">-{formatMoney(calculations.slLossAbs)} USDT</p>
+              <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Margin Mode</p>
+                <p className="mt-1 text-sm font-semibold text-cyan-300">{marginMode === "cross" ? "Cross" : "Isolated"}</p>
+                <p className="mt-1 text-xs text-slate-300">
+                  Risk Capital: {formatMoney(calculations.riskCapital)} USDT
+                </p>
               </div>
 
-              <div className="rounded-xl border border-emerald-900/50 bg-emerald-950/20 p-3.5">
-                <p className="text-xs uppercase tracking-wide text-emerald-300">Max Reward (All TP Hit)</p>
-                <p className="mt-1 text-lg font-semibold text-emerald-300">{formatMoney(calculations.totalExpectedProfit)} USDT</p>
+              <div className="rounded-lg border border-rose-900/50 bg-rose-950/20 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-rose-300">Max Risk (SL Loss)</p>
+                <p className="mt-1 text-base font-semibold text-rose-300">-{formatMoney(calculations.slLossAbs)} USDT</p>
               </div>
 
-              <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-3.5">
-                <p className="text-xs uppercase tracking-wide text-slate-400">Risk / Reward Ratio</p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">
+              <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-emerald-300">Max Reward (All TP Hit)</p>
+                <p className="mt-1 text-base font-semibold text-emerald-300">{formatMoney(calculations.totalExpectedProfit)} USDT</p>
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-950/55 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-slate-400">Risk / Reward Ratio</p>
+                <p className="mt-1 text-base font-semibold text-slate-100">
                   {Number.isFinite(calculations.riskRewardRatio)
                     ? calculations.riskRewardRatio.toFixed(2)
                     : "Infinite"}
