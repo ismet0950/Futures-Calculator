@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Crypto Futures Risk and Reward Calculator",
   description: "Plan DCA entries, stop-loss risk, and dynamic take-profit targets for leveraged crypto futures trades.",
+  icons: {
+    icon: "/photo.png",
+    shortcut: "/photo.png",
+    apple: "/photo.png",
+  },
 };
 
 export default function RootLayout({
