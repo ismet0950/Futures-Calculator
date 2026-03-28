@@ -87,6 +87,8 @@ export default function EntryRiskPlannerPage() {
   const [entries, setEntries] = useState<EntryItem[]>([{ id: 1, price: "" }]);
   const [nextId, setNextId] = useState(2);
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
+  const prevBodyOverflowRef = useRef<string | null>(null);
+  const prevBodyTouchActionRef = useRef<string | null>(null);
 
   const leverageValue = Math.max(1, asNumber(leverage) || 1);
   const chartSymbolParam = encodeURIComponent(chartSymbol);
@@ -202,6 +204,17 @@ export default function EntryRiskPlannerPage() {
     document.addEventListener("mousedown", onPointerDown);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (prevBodyOverflowRef.current !== null) {
+        document.body.style.overflow = prevBodyOverflowRef.current;
+      }
+      if (prevBodyTouchActionRef.current !== null) {
+        document.body.style.touchAction = prevBodyTouchActionRef.current;
+      }
     };
   }, []);
 
@@ -347,6 +360,24 @@ export default function EntryRiskPlannerPage() {
     setIsSearchOpen(false);
   };
 
+  const lockPageScrollForChartTouch = () => {
+    if (prevBodyOverflowRef.current === null) {
+      prevBodyOverflowRef.current = document.body.style.overflow;
+    }
+    if (prevBodyTouchActionRef.current === null) {
+      prevBodyTouchActionRef.current = document.body.style.touchAction;
+    }
+    document.body.style.overflow = "hidden";
+    document.body.style.touchAction = "none";
+  };
+
+  const unlockPageScrollAfterChartTouch = () => {
+    document.body.style.overflow = prevBodyOverflowRef.current ?? "";
+    document.body.style.touchAction = prevBodyTouchActionRef.current ?? "";
+    prevBodyOverflowRef.current = null;
+    prevBodyTouchActionRef.current = null;
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050b17] text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_8%,rgba(34,197,94,0.24),transparent_36%),radial-gradient(circle_at_85%_0%,rgba(6,182,212,0.2),transparent_30%),radial-gradient(circle_at_60%_100%,rgba(239,68,68,0.15),transparent_28%)]" />
@@ -473,7 +504,12 @@ export default function EntryRiskPlannerPage() {
               Open Chart
             </button>
           </div>
-          <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950/60">
+          <div
+            className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950/60 overscroll-contain"
+            onTouchStartCapture={lockPageScrollForChartTouch}
+            onTouchEndCapture={unlockPageScrollAfterChartTouch}
+            onTouchCancelCapture={unlockPageScrollAfterChartTouch}
+          >
             <iframe
               title="TradingView BTCUSDT Chart"
               src={chartEmbedUrl}
