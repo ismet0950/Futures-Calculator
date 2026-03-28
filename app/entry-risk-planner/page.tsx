@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type PositionType = "long" | "short";
 
@@ -12,27 +12,18 @@ type EntryItem = {
 
 type ChartOption = {
   symbol: string;
+  tvSymbol: string;
   base: string;
-  name: string;
+  market: "perp" | "spot";
 };
 
-const CHART_OPTIONS: ChartOption[] = [
-  { symbol: "BINANCE:BTCUSDT", base: "BTC", name: "Bitcoin" },
-  { symbol: "BINANCE:ETHUSDT", base: "ETH", name: "Ethereum" },
-  { symbol: "BINANCE:BNBUSDT", base: "BNB", name: "BNB" },
-  { symbol: "BINANCE:SOLUSDT", base: "SOL", name: "Solana" },
-  { symbol: "BINANCE:XRPUSDT", base: "XRP", name: "XRP" },
-  { symbol: "BINANCE:ADAUSDT", base: "ADA", name: "Cardano" },
-  { symbol: "BINANCE:DOGEUSDT", base: "DOGE", name: "Dogecoin" },
-  { symbol: "BINANCE:AVAXUSDT", base: "AVAX", name: "Avalanche" },
-  { symbol: "BINANCE:LINKUSDT", base: "LINK", name: "Chainlink" },
-  { symbol: "BINANCE:DOTUSDT", base: "DOT", name: "Polkadot" },
-  { symbol: "BINANCE:TRXUSDT", base: "TRX", name: "TRON" },
-  { symbol: "BINANCE:TONUSDT", base: "TON", name: "Toncoin" },
-  { symbol: "BINANCE:NEARUSDT", base: "NEAR", name: "NEAR Protocol" },
-  { symbol: "BINANCE:ARBUSDT", base: "ARB", name: "Arbitrum" },
-  { symbol: "BINANCE:OPUSDT", base: "OP", name: "Optimism" },
-];
+type BinanceSymbol = {
+  symbol: string;
+  baseAsset: string;
+  quoteAsset: string;
+  status: string;
+  contractType?: string;
+};
 
 const formatMoney = (value: number) =>
   Number.isFinite(value)
@@ -58,15 +49,28 @@ const asNumber = (value: string) => {
 const normalizeChartSymbol = (value: string) => {
   const normalized = value.trim().toUpperCase().replace(/\s+/g, "");
   if (!normalized) {
-    return "BINANCE:BTCUSDT";
+    return "BINANCE:BTCUSDTPERP";
+  }
+  if (normalized.startsWith("BINANCE:")) {
+    const body = normalized.replace("BINANCE:", "");
+    if (body.endsWith("PERP")) {
+      return `BINANCE:${body}`;
+    }
+    if (body.endsWith("USDT")) {
+      return `BINANCE:${body}PERP`;
+    }
+    return `BINANCE:${body}USDTPERP`;
   }
   if (normalized.includes(":")) {
     return normalized;
   }
-  if (normalized.endsWith("USDT")) {
+  if (normalized.endsWith("PERP")) {
     return `BINANCE:${normalized}`;
   }
-  return `BINANCE:${normalized}USDT`;
+  if (normalized.endsWith("USDT")) {
+    return `BINANCE:${normalized}PERP`;
+  }
+  return `BINANCE:${normalized}USDTPERP`;
 };
 
 export default function EntryRiskPlannerPage() {
@@ -74,8 +78,10 @@ export default function EntryRiskPlannerPage() {
   const [leverage, setLeverage] = useState("");
   const [stopPrice, setStopPrice] = useState("");
   const [maxLossUsdt, setMaxLossUsdt] = useState("");
-  const [chartSymbol, setChartSymbol] = useState("BINANCE:BTCUSDT");
+  const [chartSymbol, setChartSymbol] = useState("BINANCE:BTCUSDTPERP");
   const [chartSearch, setChartSearch] = useState("BTC");
+  const [chartOptions, setChartOptions] = useState<ChartOption[]>([]);
+  const [isChartLoading, setIsChartLoading] = useState(true);
   const [entries, setEntries] = useState<EntryItem[]>([{ id: 1, price: "" }]);
   const [nextId, setNextId] = useState(2);
 
@@ -83,16 +89,95 @@ export default function EntryRiskPlannerPage() {
   const chartSymbolParam = encodeURIComponent(chartSymbol);
   const chartEmbedUrl = `https://s.tradingview.com/widgetembed/?symbol=${chartSymbolParam}&interval=60&hidesidetoolbar=1&symboledit=1&saveimage=1&toolbarbg=0f172a&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`;
   const chartOpenUrl = `https://www.tradingview.com/chart/?symbol=${chartSymbolParam}`;
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadSymbols = async () => {
+      try {
+        setIsChartLoading(true);
+
+        const [perpResp, spotResp] = await Promise.all([
+          fetch("https://fapi.binance.com/fapi/v1/exchangeInfo"),
+          fetch("https://api.binance.com/api/v3/exchangeInfo"),
+        ]);
+
+        const perpData = perpResp.ok ? await perpResp.json() : { symbols: [] };
+        const spotData = spotResp.ok ? await spotResp.json() : { symbols: [] };
+
+        const perpSymbols = ((perpData.symbols as BinanceSymbol[] | undefined) ?? [])
+          .filter(
+            (s) =>
+              s.quoteAsset === "USDT" &&
+              s.status === "TRADING" &&
+              s.contractType === "PERPETUAL",
+          )
+          .map<ChartOption>((s) => ({
+            symbol: s.symbol,
+            base: s.baseAsset,
+            tvSymbol: `BINANCE:${s.symbol}PERP`,
+            market: "perp",
+          }));
+
+        const perpSymbolSet = new Set(perpSymbols.map((s) => s.symbol));
+
+        const spotSymbols = ((spotData.symbols as BinanceSymbol[] | undefined) ?? [])
+          .filter(
+            (s) =>
+              s.quoteAsset === "USDT" &&
+              s.status === "TRADING" &&
+              !perpSymbolSet.has(s.symbol),
+          )
+          .map<ChartOption>((s) => ({
+            symbol: s.symbol,
+            base: s.baseAsset,
+            tvSymbol: `BINANCE:${s.symbol}`,
+            market: "spot",
+          }));
+
+        const allOptions = [...perpSymbols, ...spotSymbols].sort((a, b) =>
+          a.symbol.localeCompare(b.symbol),
+        );
+
+        if (isActive) {
+          setChartOptions(allOptions);
+        }
+      } catch {
+        if (isActive) {
+          setChartOptions([
+            {
+              symbol: "BTCUSDT",
+              base: "BTC",
+              tvSymbol: "BINANCE:BTCUSDTPERP",
+              market: "perp",
+            },
+          ]);
+        }
+      } finally {
+        if (isActive) {
+          setIsChartLoading(false);
+        }
+      }
+    };
+
+    loadSymbols();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   const filteredChartOptions = useMemo(() => {
     const q = chartSearch.trim().toUpperCase();
+    const source = chartOptions.length > 0 ? chartOptions : [];
     if (!q) {
-      return CHART_OPTIONS.slice(0, 8);
+      return source.slice(0, 12);
     }
-    return CHART_OPTIONS.filter((option) => {
-      const full = `${option.base} ${option.name} ${option.symbol}`.toUpperCase();
+    return source.filter((option) => {
+      const full = `${option.base} ${option.symbol} ${option.market}`.toUpperCase();
       return full.includes(q);
-    }).slice(0, 8);
-  }, [chartSearch]);
+    }).slice(0, 12);
+  }, [chartSearch, chartOptions]);
 
   const result = useMemo(() => {
     const stop = asNumber(stopPrice);
@@ -212,12 +297,24 @@ export default function EntryRiskPlannerPage() {
   };
 
   const applyChartSymbol = () => {
+    const query = chartSearch.trim().toUpperCase().replace(/\s+/g, "");
+    const querySymbol = query.replace("BINANCE:", "").replace(/PERP$/, "");
+    const exact = chartOptions.find(
+      (option) => option.symbol === querySymbol || option.base === querySymbol,
+    );
+
+    if (exact) {
+      setChartSymbol(exact.tvSymbol);
+      setChartSearch(exact.symbol);
+      return;
+    }
+
     setChartSymbol(normalizeChartSymbol(chartSearch));
   };
 
   const selectChartOption = (option: ChartOption) => {
-    setChartSymbol(option.symbol);
-    setChartSearch(option.base);
+    setChartSymbol(option.tvSymbol);
+    setChartSearch(option.symbol);
   };
 
   return (
@@ -275,17 +372,22 @@ export default function EntryRiskPlannerPage() {
                 placeholder="Coin yaz: BTC, ETH, SOL və ya BINANCE:ADAUSDT"
                 className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-cyan-500"
               />
+              {isChartLoading ? (
+                <p className="mt-1 text-[11px] text-slate-400">Binance simvolları yüklənir...</p>
+              ) : null}
               {filteredChartOptions.length > 0 ? (
                 <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-700 bg-slate-900 shadow-xl">
                   {filteredChartOptions.map((option) => (
                     <button
-                      key={option.symbol}
+                      key={`${option.symbol}-${option.market}`}
                       type="button"
                       onClick={() => selectChartOption(option)}
                       className="flex w-full items-center justify-between px-2.5 py-2 text-left text-xs text-slate-200 transition hover:bg-slate-800"
                     >
-                      <span>{option.name} ({option.base})</span>
-                      <span className="text-slate-400">{option.symbol}</span>
+                      <span>{option.symbol}</span>
+                      <span className="text-slate-400">
+                        {option.market === "perp" ? "PERP" : "SPOT"}
+                      </span>
                     </button>
                   ))}
                 </div>
