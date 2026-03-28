@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type PositionType = "long" | "short";
 
@@ -80,10 +80,13 @@ export default function EntryRiskPlannerPage() {
   const [maxLossUsdt, setMaxLossUsdt] = useState("");
   const [chartSymbol, setChartSymbol] = useState("BINANCE:BTCUSDTPERP");
   const [chartSearch, setChartSearch] = useState("BTC");
+  const [highlightedOptionIndex, setHighlightedOptionIndex] = useState(-1);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [chartOptions, setChartOptions] = useState<ChartOption[]>([]);
   const [isChartLoading, setIsChartLoading] = useState(true);
   const [entries, setEntries] = useState<EntryItem[]>([{ id: 1, price: "" }]);
   const [nextId, setNextId] = useState(2);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
 
   const leverageValue = Math.max(1, asNumber(leverage) || 1);
   const chartSymbolParam = encodeURIComponent(chartSymbol);
@@ -178,6 +181,29 @@ export default function EntryRiskPlannerPage() {
       return full.includes(q);
     }).slice(0, 12);
   }, [chartSearch, chartOptions]);
+
+  useEffect(() => {
+    if (filteredChartOptions.length === 0) {
+      setHighlightedOptionIndex(-1);
+      return;
+    }
+
+    setHighlightedOptionIndex(0);
+  }, [chartSearch, filteredChartOptions.length]);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!searchContainerRef.current?.contains(target)) {
+        setIsSearchOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+    };
+  }, []);
 
   const result = useMemo(() => {
     const stop = asNumber(stopPrice);
@@ -306,15 +332,19 @@ export default function EntryRiskPlannerPage() {
     if (exact) {
       setChartSymbol(exact.tvSymbol);
       setChartSearch(exact.symbol);
+      setIsSearchOpen(false);
       return;
     }
 
     setChartSymbol(normalizeChartSymbol(chartSearch));
+    setIsSearchOpen(false);
   };
 
   const selectChartOption = (option: ChartOption) => {
     setChartSymbol(option.tvSymbol);
     setChartSearch(option.symbol);
+    setHighlightedOptionIndex(-1);
+    setIsSearchOpen(false);
   };
 
   return (
@@ -359,14 +389,53 @@ export default function EntryRiskPlannerPage() {
             <p className="text-xs text-slate-300">TradingView - {chartSymbol}</p>
           </div>
           <div className="mb-3 grid gap-2.5 rounded-lg border border-slate-800 bg-slate-950/55 p-3 sm:grid-cols-[1fr_auto]">
-            <div className="relative">
+            <div ref={searchContainerRef} className="relative">
               <input
                 type="text"
                 value={chartSearch}
-                onChange={(event) => setChartSearch(event.target.value)}
+                onChange={(event) => {
+                  setChartSearch(event.target.value);
+                  setIsSearchOpen(true);
+                }}
+                onFocus={() => setIsSearchOpen(true)}
                 onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    if (filteredChartOptions.length === 0) {
+                      return;
+                    }
+                    setHighlightedOptionIndex((prev) =>
+                      prev < filteredChartOptions.length - 1 ? prev + 1 : 0,
+                    );
+                    return;
+                  }
+
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    if (filteredChartOptions.length === 0) {
+                      return;
+                    }
+                    setHighlightedOptionIndex((prev) =>
+                      prev > 0 ? prev - 1 : filteredChartOptions.length - 1,
+                    );
+                    return;
+                  }
+
                   if (event.key === "Enter") {
-                    applyChartSymbol();
+                    event.preventDefault();
+                    const highlightedOption = filteredChartOptions[highlightedOptionIndex];
+                    if (highlightedOption) {
+                      selectChartOption(highlightedOption);
+                    } else {
+                      applyChartSymbol();
+                    }
+                    setIsSearchOpen(false);
+                    return;
+                  }
+
+                  if (event.key === "Escape") {
+                    setHighlightedOptionIndex(-1);
+                    setIsSearchOpen(false);
                   }
                 }}
                 placeholder="Coin yaz: BTC, ETH, SOL və ya BINANCE:ADAUSDT"
@@ -375,14 +444,17 @@ export default function EntryRiskPlannerPage() {
               {isChartLoading ? (
                 <p className="mt-1 text-[11px] text-slate-400">Binance simvolları yüklənir...</p>
               ) : null}
-              {filteredChartOptions.length > 0 ? (
+              {isSearchOpen && filteredChartOptions.length > 0 ? (
                 <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-slate-700 bg-slate-900 shadow-xl">
-                  {filteredChartOptions.map((option) => (
+                  {filteredChartOptions.map((option, index) => (
                     <button
                       key={`${option.symbol}-${option.market}`}
                       type="button"
                       onClick={() => selectChartOption(option)}
-                      className="flex w-full items-center justify-between px-2.5 py-2 text-left text-xs text-slate-200 transition hover:bg-slate-800"
+                      onMouseEnter={() => setHighlightedOptionIndex(index)}
+                      className={`flex w-full items-center justify-between px-2.5 py-2 text-left text-xs text-slate-200 transition ${
+                        index === highlightedOptionIndex ? "bg-slate-800" : "hover:bg-slate-800"
+                      }`}
                     >
                       <span>{option.symbol}</span>
                       <span className="text-slate-400">
